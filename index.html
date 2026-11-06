@@ -89,8 +89,17 @@
   .player.active { border-color: var(--accent); }
   .player .name { font-size: 14px; color: var(--muted); display: flex; justify-content: space-between; gap: 6px; white-space: nowrap; overflow: hidden; }
   .player .legs { color: var(--accent); font-weight: 700; }
-  .player .score { font-size: 32px; font-weight: 800; line-height: 1.05; font-variant-numeric: tabular-nums; color: var(--muted); }
-  .player.active .score { font-size: 44px; color: var(--text); }
+  /* Scores are always laid out at full size; inactive ones are scaled down, so
+     switching players can animate smoothly without reflowing the cards. */
+  .player .score {
+    font-size: 44px; font-weight: 800; line-height: 1.05; font-variant-numeric: tabular-nums;
+    color: var(--muted); transform: scale(.73); transform-origin: left center;
+  }
+  .player.active .score { transform: none; color: var(--text); }
+  @media (prefers-reduced-motion: no-preference) {
+    .player { transition: border-color .25s ease; }
+    .player .score { transition: transform .25s ease, color .25s ease; }
+  }
   .player .avg { font-size: 12px; color: var(--muted); }
   /* Checkout sits centred in the gap between the board and the buttons. The board
      area always keeps at least 24px under the board for it, so nothing shifts
@@ -128,6 +137,8 @@
   .board-art .hl { fill: #fff; fill-opacity: .28; stroke: var(--accent); stroke-width: 2.5; pointer-events: none; transition: fill-opacity .12s; }
   .board-art .hl.flash { fill-opacity: .7; transition: none; }
   .board-art .wire { stroke: var(--wire); stroke-width: .7; }
+  .board-art .num.co { fill: var(--accent); }
+  @media (prefers-reduced-motion: no-preference) { .board-art .num { transition: fill .25s ease; } }
   .board-art .num { fill: #fff; font-weight: 700; font-size: 17px; pointer-events: none; text-anchor: middle; dominant-baseline: central; }
 
   .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -152,7 +163,25 @@
   @media (prefers-reduced-motion: reduce) { .fab:not([hidden]) { animation: none; } }  .slot.total.bust { background: var(--danger); color: #fff; font-size: 18px; }
   /* Turn finished: board and dart inputs rest until "Next" is pressed (Undo stays live). */
   #game.pending #missBtn, #game.pending #typeBtn { opacity: .3; }
-  .board-wrap.locked svg.board { opacity: .35; cursor: default; }
+  .board-wrap.locked svg.board { cursor: default; }
+  .board-wrap.locked svg.board > :not(.markers) { opacity: .35; }   /* markers stay readable */
+
+  /* Hit markers: where each dart of this turn was tapped. */
+  .markers { pointer-events: none; }
+  .markers circle { fill: #fff; stroke: #111; stroke-width: 2; }
+  .markers text { font-size: 10px; font-weight: 800; fill: #111; text-anchor: middle; dominant-baseline: central; }
+
+  /* Feedback animations: short, never block input, off with "Reduce motion". */
+  @media (prefers-reduced-motion: no-preference) {
+    .markers .mk-new { animation: mk-in .18s cubic-bezier(.2, .9, .3, 1.4); transform-box: fill-box; transform-origin: center; }
+    .slot.pop { animation: slot-pop .22s ease-out; }
+    .slot.total.shake { animation: shake .3s ease-in-out; }
+    button { transition: transform .08s; }
+    button:active:not(:disabled) { transform: scale(.96); }
+  }
+  @keyframes mk-in { from { transform: scale(0); opacity: 0; } }
+  @keyframes slot-pop { from { transform: scale(1.15); filter: brightness(1.8); } }
+  @keyframes shake { 20%, 60% { transform: translateX(-5px); } 40%, 80% { transform: translateX(5px); } }
   .actions .miss {
     background: var(--panel-2); color: #ff8589;
     font-size: 18px; letter-spacing: .04em;
@@ -193,7 +222,8 @@
   .overlay h2 { margin: 4px 0; font-size: 28px; }
   .overlay .stats { color: var(--muted); }
 
-  #padOverlay { inset: auto 0 auto 0; top: 0; height: 100%; align-items: flex-end; padding: 0; }
+  #padOverlay, #editOverlay { inset: auto 0 auto 0; top: 0; height: 100%; }
+  #padOverlay { align-items: flex-end; padding: 0; }
   #padOverlay .card {
     max-width: 520px; border-radius: 18px 18px 0 0;
     padding-bottom: calc(16px + env(safe-area-inset-bottom));
@@ -324,7 +354,7 @@ function buildBoard(svg) {
       el('path', { d: sector(r1, r2, a1, a2), fill, class: 'wire', 'data-n': n, 'data-m': m }, svg);
     }
     const [tx, ty] = pt((R.doubleOut + R.numbers) / 2, i * 18);
-    el('text', { x: tx, y: ty, class: 'num' }, svg).textContent = n;
+    el('text', { x: tx, y: ty, class: 'num', 'data-num': n }, svg).textContent = n;
   });
 
   el('path', { d: disc(R.outerBull), fill: 'var(--board-green)', class: 'wire', 'data-n': 25, 'data-m': 1 }, svg);
@@ -333,11 +363,13 @@ function buildBoard(svg) {
   // Magnifier: a copy of the board that follows the finger.
   const loupeSvg = $('loupe').querySelector('svg');
   loupeSvg.innerHTML = svg.innerHTML;
+  markers = el('g', { class: 'markers' }, svg);
   hl = el('path', { class: 'hl', d: '' }, svg);
   loupeHl = el('path', { class: 'hl', d: '' }, loupeSvg);
 
   svg.addEventListener('pointerdown', e => {
     if (!S || S.winner !== null || S.pending || aim) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;   // right/middle click isn't a throw
     e.preventDefault();
     svg.setPointerCapture(e.pointerId);
     aim = { id: e.pointerId, touch: e.pointerType !== 'mouse', loupe: false };
@@ -348,7 +380,7 @@ function buildBoard(svg) {
   });
   svg.addEventListener('pointermove', e => {
     if (aim) { if (e.pointerId === aim.id) updateAim(e); }
-    else if (e.pointerType === 'mouse') setHl(hitAtEvent(e).d);
+    else if (e.pointerType === 'mouse' && S && S.winner === null && !S.pending) setHl(hitAtEvent(e).d);
   });
   svg.addEventListener('pointerup', e => {
     if (!aim || e.pointerId !== aim.id) return;
@@ -356,7 +388,7 @@ function buildBoard(svg) {
     endAim();
     flash(h.d);
     if (navigator.vibrate) navigator.vibrate(15);
-    throwDart(h.n, h.m);
+    throwDart(h.n, h.m, h);
   });
   svg.addEventListener('pointercancel', endAim);
   // Taps are handled on pointerup; stop the browser's follow-up click from
@@ -393,6 +425,7 @@ function hitAtEvent(e) {
 }
 
 let aim = null;   // the press currently aiming at the board
+let markers;      // <g> holding this turn's hit markers
 let loupeHl;
 
 function setHl(d) {
@@ -403,7 +436,7 @@ function setHl(d) {
 function updateAim(e) {
   aim.last = { clientX: e.clientX, clientY: e.clientY };
   const p = toBoard(e);
-  const h = hitAt(p.x, p.y);
+  const h = { ...hitAt(p.x, p.y), x: p.x, y: p.y };
   setHl(h.d);
   if (aim.loupe) {
     const size = 140, zoom = 2.2;
@@ -530,13 +563,16 @@ function nextLeg() {
   undoStack = [];
 }
 
-function throwDart(n, m) {
+// `at` is the tapped board position, if the dart came from the board.
+function throwDart(n, m, at) {
   if (!S || S.winner !== null || S.pending) return;
   undoStack.push(JSON.stringify(S));
   if (undoStack.length > 300) undoStack.shift();
 
   const p = S.players[S.cur];
   const d = { n, m, v: n * m };
+  if (at) { d.x = Math.round(at.x); d.y = Math.round(at.y); }
+  fx = { dart: S.turn.length };
   S.turn.push(d);
   p.darts++;
 
@@ -545,6 +581,10 @@ function throwDart(n, m) {
 
   if (bust) p.score = S.turnStart;
   else p.score = rem;
+  if (bust) {
+    fx.bust = true;
+    if (navigator.vibrate) navigator.vibrate([40, 60, 40]);
+  }
   if (bust || rem === 0 || S.turn.length === 3) {
     finishTurn({
       labels: S.turn.map(dartLabel),
@@ -630,6 +670,7 @@ function openEdit(i) {
   $('editScore').value = p.score;
   $('editScore').classList.remove('bad');
   $('editOverlay').hidden = false;
+  fitOverlays();
   $('editScore').focus();
   $('editScore').select();
 }
@@ -662,18 +703,21 @@ function openPad() {
   $('padInput').value = '';
   updatePad();
   $('padOverlay').hidden = false;
-  fitPad();
+  fitOverlays();
   $('padInput').focus();   // synchronous with the tap so mobile opens the keyboard
 }
 function closePad() { $('padOverlay').hidden = true; }
 
-// Keep the drawer glued to the visible part of the screen: when the keyboard
+// Keep dialogs glued to the visible part of the screen: when the keyboard
 // opens, the visual viewport shrinks (and may scroll), so follow it.
-function fitPad() {
-  const vv = window.visualViewport, o = $('padOverlay');
-  if (!vv || o.hidden) return;
-  o.style.top = vv.offsetTop + 'px';
-  o.style.height = vv.height + 'px';
+function fitOverlays() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  for (const o of [$('padOverlay'), $('editOverlay')]) {
+    if (o.hidden) continue;
+    o.style.top = vv.offsetTop + 'px';
+    o.style.height = vv.height + 'px';
+  }
 }
 function padCheck() {
   const v = +$('padInput').value || 0;
@@ -712,7 +756,13 @@ function average(p) {
 const $ = id => document.getElementById(id);
 const esc = s => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+// One-shot animation hints from the last action; consumed by the next render so
+// re-renders (undo, edits, reloads) never replay them.
+let fx = null;
+
 function render() {
+  const f = fx;
+  fx = null;
   const inGame = !!S;
   $('setup').hidden = inGame;
   $('game').hidden = !inGame;
@@ -726,30 +776,34 @@ function render() {
   const cur = S.players[S.cur];
   const co = S.winner === null ? checkout(cur.score, 3 - S.turn.length, S.doubleOut) : null;
 
-  $('players').innerHTML = S.players.map((p, i) => `
-    <div class="player ${i === S.cur ? 'active' : ''}" data-i="${i}">
-      <div class="name"><span>${esc(p.name)}</span>${p.legs ? `<span class="legs">${p.legs}</span>` : ''}</div>
-      <div class="score">${p.score}</div>
-      <div class="avg">avg ${average(p)}</div>
-      <div class="last ${p.last && p.last.bust ? 'bust' : ''}">${p.last ? esc(lastText(p.last)) : '&nbsp;'}</div>
-    </div>`).join('');
+  renderPlayers();
   centerActivePlayer();
+
+  markers.innerHTML = S.turn.map((d, i) => d.x == null ? '' : `
+    <g transform="translate(${d.x} ${d.y})"><g class="${f && f.dart === i ? 'mk-new' : ''}">
+      <circle r="8"></circle><text>${i + 1}</text>
+    </g></g>`).join('');
 
 
   const slots = [0, 1, 2].map(i => {
     const d = S.turn[i];
     if (!d) return `<div class="slot empty">•</div>`;
-    const cls = d.m === 3 ? 't' : d.m === 2 ? 'd' : '';
+    const cls = (d.m === 3 ? 't' : d.m === 2 ? 'd' : '') + (f && f.dart === i ? ' pop' : '');
     return `<div class="slot ${cls}">${dartLabel(d)}</div>`;
   });
   const total = S.turn.reduce((s, d) => s + d.v, 0);
   const busted = S.pending && cur.last && cur.last.bust;
   $('turn').innerHTML = slots.join('') +
-    (busted ? `<div class="slot total bust">BUST</div>` : `<div class="slot total">${total}</div>`);
+    (busted ? `<div class="slot total bust ${f && f.bust ? 'shake' : ''}">BUST</div>` : `<div class="slot total">${total}</div>`);
 
   $('checkout').textContent = co ? co.map(dartLabel).join(' · ') : '';
+  // Light up the board numbers the checkout route uses.
+  const coNums = new Set((co || []).map(d => d.n));
+  for (const t of $('board').querySelectorAll('.num')) t.classList.toggle('co', coNums.has(+t.dataset.num));
 
   $('boardWrap').classList.toggle('locked', !!S.pending);
+  // Drop any leftover hover on a locked board (but let the last dart's flash play).
+  if ((S.pending || S.winner !== null) && !hl.classList.contains('flash')) setHl('');
   $('game').classList.toggle('pending', !!S.pending);
   if ($('nextBtn').hidden && S.pending) nextShownAt = performance.now();
   $('nextBtn').hidden = !S.pending;
@@ -767,6 +821,32 @@ function render() {
   } else {
     $('winOverlay').hidden = true;
   }
+}
+
+// Player cards are updated in place (not rebuilt) so the active-player change
+// can transition smoothly.
+function renderPlayers() {
+  const box = $('players');
+  if (box.children.length !== S.players.length) {
+    box.innerHTML = S.players.map((_, i) => `
+      <div class="player" data-i="${i}">
+        <div class="name"><span></span><span class="legs"></span></div>
+        <div class="score"></div>
+        <div class="avg"></div>
+        <div class="last"></div>
+      </div>`).join('');
+  }
+  S.players.forEach((p, i) => {
+    const card = box.children[i];
+    card.classList.toggle('active', i === S.cur);
+    card.querySelector('.name span').textContent = p.name;
+    card.querySelector('.legs').textContent = p.legs || '';
+    card.querySelector('.score').textContent = p.score;
+    card.querySelector('.avg').textContent = `avg ${average(p)}`;
+    const last = card.querySelector('.last');
+    last.textContent = p.last ? lastText(p.last) : '\u00a0';
+    last.classList.toggle('bust', !!(p.last && p.last.bust));
+  });
 }
 
 // Bring the player who's throwing into view in the carousel.
@@ -827,11 +907,16 @@ $('typeBtn').onclick = openPad;
 $('padInput').oninput = updatePad;
 $('padForm').onsubmit = submitPad;
 if (window.visualViewport) {
-  visualViewport.addEventListener('resize', fitPad);
-  visualViewport.addEventListener('scroll', fitPad);
+  visualViewport.addEventListener('resize', fitOverlays);
+  visualViewport.addEventListener('scroll', fitOverlays);
 }
 // Tapping the dimmed area around the drawer closes it.
 $('padOverlay').onclick = e => { if (e.target === e.currentTarget) { $('padInput').blur(); closePad(); } };
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (!$('padOverlay').hidden) { $('padInput').blur(); closePad(); }
+  if (!$('editOverlay').hidden) closeEdit();
+});
 $('undoBtn').onclick = undo;
 $('winUndoBtn').onclick = undo;
 $('nextLegBtn').onclick = () => { nextLeg(); save(); render(); };
