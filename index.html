@@ -36,7 +36,9 @@
   .wrap {
     max-width: 520px;
     margin: 0 auto;
-    padding: 12px 16px calc(16px + env(safe-area-inset-bottom));
+    /* Even 16px on every side; grows only where the notch / home bar needs more. */
+    padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+             max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
     min-height: 100%;
     display: flex;
     flex-direction: column;
@@ -65,61 +67,123 @@
   }
 
   /* ---------- Game ---------- */
-  .topbar { display: flex; justify-content: space-between; align-items: center; }
-  .topbar .meta { color: var(--muted); font-size: 14px; }
   .link { border: 0; background: none; color: var(--muted); padding: 6px 0; }
   .player { cursor: pointer; }
-  .player .score::after { content: ' ✎'; font-size: 13px; color: var(--muted); font-weight: 400; vertical-align: top; }
   .edit-row { display: flex; flex-direction: column; gap: 6px; text-align: left; }
   .edit-row input {
     padding: 12px; border-radius: 10px; border: 1px solid var(--panel-2); background: var(--bg);
     color: var(--text); font: inherit; font-size: 20px; user-select: text;
   }
   .edit-row input.bad { border-color: var(--danger); }
-  .players { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
-  .player {
-    background: var(--panel); border-radius: 12px; padding: 10px 12px; border: 2px solid transparent;
-    transition: border-color .15s, opacity .15s; opacity: .6;
+  /* Horizontal carousel: cards share the width when they fit, otherwise scroll sideways. */
+  .players {
+    display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x mandatory; scroll-padding: 0 8px;
+    scrollbar-width: none; flex-shrink: 0;
   }
-  .player.active { border-color: var(--accent); opacity: 1; }
+  .players::-webkit-scrollbar { display: none; }
+  .players .player { flex: 1 0 140px; min-width: 0; scroll-snap-align: center; }
+  .player {
+    background: var(--panel); border-radius: 12px; padding: 8px 12px 10px; border: 2px solid transparent;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .player.active { border-color: var(--accent); }
   .player .name { font-size: 14px; color: var(--muted); display: flex; justify-content: space-between; gap: 6px; white-space: nowrap; overflow: hidden; }
   .player .legs { color: var(--accent); font-weight: 700; }
-  .player .score { font-size: 34px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .player .score { font-size: 32px; font-weight: 800; line-height: 1.05; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .player.active .score { font-size: 44px; color: var(--text); }
   .player .avg { font-size: 12px; color: var(--muted); }
+  /* Checkout sits centred in the gap between the board and the buttons. The board
+     area always keeps at least 24px under the board for it, so nothing shifts
+     when it appears. Taps there still count as a miss (it ignores the pointer). */
+  .checkout {
+    position: absolute; left: 0; right: 0; height: 24px; line-height: 24px; pointer-events: none;
+    top: calc((min(100cqw, 100cqh - 24px) + 100cqh) / 2); transform: translateY(-50%);
+    text-align: center; color: var(--accent); font-weight: 700; font-size: 16px; letter-spacing: .02em;
+  }
 
   .turn { display: flex; gap: 8px; align-items: stretch; }
   .slot {
     flex: 1; background: var(--panel); border-radius: 10px; padding: 4px 0; text-align: center;
-    font-weight: 700; font-size: 20px; min-height: 46px; display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 20px; min-height: 48px; display: flex; align-items: center; justify-content: center;
   }
   .slot.empty { color: var(--panel-2); }
   .slot.t { color: var(--board-red); }
   .slot.d { color: #3ecf7f; }
-  .slot.total { flex: 1.2; background: var(--panel-2); font-variant-numeric: tabular-nums; }
-  .checkout { text-align: center; color: var(--accent); font-weight: 600; min-height: 22px; font-size: 15px; }
+  .slot.total { flex: 1.2; background: var(--panel-2); font-size: 24px; font-variant-numeric: tabular-nums; }
+  .player .last { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .player .last.bust { color: var(--danger); }
 
-  #game.wrap { max-width: 900px; height: 100dvh; min-height: 0; gap: 8px; padding-top: 8px; }
-  .board-wrap { position: relative; flex: 1; min-height: 320px; margin: 0 -12px; }
-  svg.board { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-  #game .players, #game .turn, #game .checkout, #game .actions, #game .topbar { width: 100%; max-width: 520px; margin: 0 auto; }
-  #game { cursor: pointer; }
-  svg.board .hl { fill: #fff; fill-opacity: .28; stroke: var(--accent); stroke-width: 2.5; pointer-events: none; transition: fill-opacity .12s; }
-  svg.board .hl.flash { fill-opacity: .7; transition: none; }
-  svg.board .wire { stroke: var(--wire); stroke-width: .7; }
-  svg.board .num { fill: #fff; font-weight: 700; font-size: 17px; pointer-events: none; text-anchor: middle; dominant-baseline: central; }
+  #game.wrap { max-width: 900px; height: 100dvh; min-height: 0; gap: 10px; }
+  .board-wrap { position: relative; flex: 1; min-height: 280px; margin: 24px -12px 0; container-type: size; }
+  .exit-btn {
+    align-self: flex-start; flex-shrink: 0; width: 30px; height: 30px; margin-bottom: 14px; border: 0; border-radius: 50%;
+    background: var(--panel); color: var(--muted); font-size: 14px; line-height: 1;
+  }
+  /* Line up with the left edge of the (centred, max 520px) player cards on wide screens. */
+  #game .exit-btn { margin-left: max(0px, calc((100% - 520px) / 2)); }
+  svg.board { touch-action: none; }
+  svg.board { position: absolute; top: 0; left: 0; width: 100%; height: calc(100% - 24px); display: block; }
+  #game .players, #game .turn, #game .actions { width: 100%; max-width: 520px; margin: 0 auto; }
+  svg.board { cursor: pointer; }
+  .board-art .hl { fill: #fff; fill-opacity: .28; stroke: var(--accent); stroke-width: 2.5; pointer-events: none; transition: fill-opacity .12s; }
+  .board-art .hl.flash { fill-opacity: .7; transition: none; }
+  .board-art .wire { stroke: var(--wire); stroke-width: .7; }
+  .board-art .num { fill: #fff; font-weight: 700; font-size: 17px; pointer-events: none; text-anchor: middle; dominant-baseline: central; }
 
   .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .actions button { border: 0; border-radius: 12px; padding: 12px; background: var(--panel-2); font-weight: 700; font-size: 16px; }
-  .actions .miss { background: var(--panel); color: var(--muted); }
-
-  .toast {
-    position: fixed; left: 50%; top: 16px; transform: translate(-50%, -150%); background: var(--panel-2);
-    padding: 10px 18px; border-radius: 999px; font-weight: 700; transition: transform .25s; z-index: 10;
-    box-shadow: 0 6px 24px rgba(0,0,0,.4); white-space: nowrap;
+  #game .actions button { padding: 0 8px; height: 56px; font-size: 15px; white-space: nowrap; }
+  #game .actions .miss { font-size: 18px; }
+  /* Floating "Next player" action: bottom-right of the board area, under the right
+     thumb. It may overlap the board's corner, which is locked while it shows. */
+  .fab {
+    position: absolute; right: 12px; bottom: 4px; z-index: 2; max-width: calc(100% - 24px);
+    height: 60px; padding: 0 24px; border: 0; border-radius: 30px;
+    background: var(--accent); color: #1a1a1a; font-weight: 800; font-size: 18px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    box-shadow: 0 10px 28px rgba(0,0,0,.55), 0 0 0 4px rgba(245,197,66,.18);
   }
-  .toast.show { transform: translate(-50%, 0); }
-  .toast.bust { background: var(--danger); }
-  .toast.big { background: var(--accent); color: #1a1a1a; }
+  /* Pops in, then a slow, soft glow so it reads as "your move" without nagging. */
+  .fab:not([hidden]) { animation: fab-in .22s cubic-bezier(.2, .9, .3, 1.3), fab-glow 2.4s ease-in-out .3s infinite; }
+  @keyframes fab-in { from { opacity: 0; transform: translateY(10px) scale(.92); } }
+  @keyframes fab-glow {
+    50% { box-shadow: 0 10px 28px rgba(0,0,0,.55), 0 0 0 9px rgba(245,197,66,.10); }
+  }
+  @media (prefers-reduced-motion: reduce) { .fab:not([hidden]) { animation: none; } }  .slot.total.bust { background: var(--danger); color: #fff; font-size: 18px; }
+  /* Turn finished: board and dart inputs rest until "Next" is pressed (Undo stays live). */
+  #game.pending #missBtn, #game.pending #typeBtn { opacity: .3; }
+  .board-wrap.locked svg.board { opacity: .35; cursor: default; }
+  .actions .miss {
+    background: var(--panel-2); color: #ff8589;
+    font-size: 18px; letter-spacing: .04em;
+  }
+  #game .actions { grid-template-columns: 1fr 1.4fr 1fr; }
+
+  .loupe {
+    position: fixed; width: 140px; height: 140px; border-radius: 50%; overflow: hidden; z-index: 15;
+    border: 3px solid var(--accent); box-shadow: 0 8px 30px rgba(0,0,0,.6); pointer-events: none; background: #0b0b0b;
+  }
+  .loupe svg { width: 100%; height: 100%; display: block; }
+  .loupe svg .hl { stroke-width: 2; vector-effect: non-scaling-stroke; }
+  .loupe::after {
+    content: ''; position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px;
+    border-radius: 50%; background: #fff; box-shadow: 0 0 0 2px #000;
+  }
+  .loupe-label {
+    position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); background: rgba(0,0,0,.75);
+    padding: 1px 8px; border-radius: 999px; font-weight: 800; font-size: 15px; z-index: 1;
+  }
+
+  .pad-input {
+    width: 100%; padding: 10px; border-radius: 12px; border: 2px solid var(--panel-2); background: var(--bg);
+    color: var(--text); font: inherit; font-size: 44px; font-weight: 800; text-align: center; user-select: text;
+  }
+  .pad-input:focus { outline: none; border-color: var(--accent); }
+  .pad-hint { color: var(--muted); font-size: 14px; }
+  .pad-hint:empty { display: none; }
+  .pad-hint.bad { color: var(--danger); }
+  .pad-ok:disabled { opacity: .35; }
+
 
   .overlay {
     position: fixed; inset: 0; background: rgba(0,0,0,.7); display: flex; align-items: center; justify-content: center;
@@ -128,6 +192,12 @@
   .overlay .card { width: 100%; max-width: 380px; text-align: center; }
   .overlay h2 { margin: 4px 0; font-size: 28px; }
   .overlay .stats { color: var(--muted); }
+
+  #padOverlay { inset: auto 0 auto 0; top: 0; height: 100%; align-items: flex-end; padding: 0; }
+  #padOverlay .card {
+    max-width: 520px; border-radius: 18px 18px 0 0;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  }
 </style>
 </head>
 <body>
@@ -154,21 +224,28 @@
 
 <!-- Game screen -->
 <div id="game" class="wrap" hidden>
-  <div class="topbar">
-    <button class="link" id="quitBtn">‹ Setup</button>
-    <span class="meta" id="meta"></span>
-  </div>
+  <button class="exit-btn" id="quitBtn" aria-label="Leave game">✕</button>
   <div class="players" id="players"></div>
   <div class="turn" id="turn"></div>
-  <div class="checkout" id="checkout"></div>
-  <div class="board-wrap"><svg class="board" id="board" viewBox="-213 -213 426 426"></svg></div>
+  <div class="board-wrap" id="boardWrap"><button class="fab" id="nextBtn" hidden></button><svg class="board board-art" id="board" viewBox="-213 -213 426 426" preserveAspectRatio="xMidYMin meet"></svg><div class="checkout" id="checkout"></div></div>
   <div class="actions">
-    <button class="miss" id="missBtn">Miss</button>
-    <button id="undoBtn">↶ Undo</button>
+    <button id="typeBtn">Type score</button>
+    <button class="miss" id="missBtn">MISS</button>
+    <button id="undoBtn">Undo</button>
   </div>
 </div>
 
-<div class="toast" id="toast"></div>
+
+<div class="loupe" id="loupe" hidden><svg class="board-art" viewBox="0 0 10 10"></svg><span class="loupe-label"></span></div>
+
+<div class="overlay" id="padOverlay" hidden>
+  <form class="card" id="padForm">
+    <div class="label" id="padTitle"></div>
+    <input class="pad-input" id="padInput" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" autocomplete="off" placeholder="0">
+    <div class="pad-hint" id="padHint"></div>
+    <button class="primary pad-ok" id="padOk" type="submit">OK</button>
+  </form>
+</div>
 
 <div class="overlay" id="editOverlay" hidden>
   <form class="card" id="editForm">
@@ -176,18 +253,17 @@
     <label class="edit-row"><span class="label">Name</span><input id="editName" maxlength="20"></label>
     <label class="edit-row"><span class="label">Score left</span><input id="editScore" type="number" inputmode="numeric" min="1" max="9999"></label>
     <button class="primary" type="submit">Save</button>
-    <div class="actions"><button type="button" id="editCancel">Cancel</button><button type="button" id="editReset">Reset to start</button></div>
   </form>
 </div>
 
 <div class="overlay" id="winOverlay" hidden>
   <div class="card">
-    <div class="label">Leg won</div>
+    <div class="label" id="winLabel"></div>
     <h2 id="winName"></h2>
     <div class="stats" id="winStats"></div>
     <button class="primary" id="nextLegBtn">Next leg</button>
     <div class="actions">
-      <button id="winUndoBtn">↶ Undo</button>
+      <button id="winUndoBtn">Undo</button>
       <button id="newGameBtn">New game</button>
     </div>
   </div>
@@ -229,7 +305,8 @@ function disc(r) {
 let hl;
 
 function buildBoard(svg) {
-  // Outer ring with numbers: just a background, taps on it count as a miss.
+  // Outer ring with numbers: just a background. Taps on it, or anywhere else in
+  // the board area outside the double ring, count as a miss (see hitAt).
   el('path', { d: disc(R.numbers), fill: '#0b0b0b' }, svg);
 
   ORDER.forEach((n, i) => {
@@ -253,38 +330,114 @@ function buildBoard(svg) {
   el('path', { d: disc(R.outerBull), fill: 'var(--board-green)', class: 'wire', 'data-n': 25, 'data-m': 1 }, svg);
   el('path', { d: disc(R.bull), fill: 'var(--board-red)', class: 'wire', 'data-n': 25, 'data-m': 2 }, svg);
 
+  // Magnifier: a copy of the board that follows the finger.
+  const loupeSvg = $('loupe').querySelector('svg');
+  loupeSvg.innerHTML = svg.innerHTML;
   hl = el('path', { class: 'hl', d: '' }, svg);
-  svg.addEventListener('pointermove', e => {
-    if (e.pointerType !== 'mouse') return;
-    const t = e.target.closest('[data-n]');
-    hl.setAttribute('d', t ? t.getAttribute('d') : '');
+  loupeHl = el('path', { class: 'hl', d: '' }, loupeSvg);
+
+  svg.addEventListener('pointerdown', e => {
+    if (!S || S.winner !== null || S.pending || aim) return;
+    e.preventDefault();
+    svg.setPointerCapture(e.pointerId);
+    aim = { id: e.pointerId, touch: e.pointerType !== 'mouse', loupe: false };
+    // Only bring up the magnifier if the finger stays down a moment, so quick
+    // taps don't flicker.
+    if (aim.touch) aim.timer = setTimeout(() => { aim.loupe = true; updateAim(aim.last); }, 120);
+    updateAim(e);
   });
-  svg.addEventListener('pointerleave', () => hl.setAttribute('d', ''));
+  svg.addEventListener('pointermove', e => {
+    if (aim) { if (e.pointerId === aim.id) updateAim(e); }
+    else if (e.pointerType === 'mouse') setHl(hitAtEvent(e).d);
+  });
+  svg.addEventListener('pointerup', e => {
+    if (!aim || e.pointerId !== aim.id) return;
+    const h = updateAim(e);
+    endAim();
+    flash(h.d);
+    if (navigator.vibrate) navigator.vibrate(15);
+    throwDart(h.n, h.m);
+  });
+  svg.addEventListener('pointercancel', endAim);
+  // Taps are handled on pointerup; stop the browser's follow-up click from
+  // landing on whatever just appeared under the finger.
+  svg.addEventListener('touchend', e => e.preventDefault());
+  svg.addEventListener('pointerleave', () => { if (!aim) setHl(''); });
+}
+
+// What's under a board coordinate, plus the outline to highlight.
+function hitAt(x, y) {
+  const r = Math.hypot(x, y);
+  if (r <= R.bull) return { n: 25, m: 2, d: disc(R.bull) };
+  if (r <= R.outerBull) return { n: 25, m: 1, d: disc(R.outerBull) };
+  if (r > R.doubleOut) return { n: 0, m: 0, d: '' };
+  const i = Math.floor(((Math.atan2(x, -y) * 180 / Math.PI + 369) % 360) / 18);
+  const [r1, r2, m] =
+    r < R.tripleIn ? [R.outerBull, R.tripleIn, 1] :
+    r <= R.tripleOut ? [R.tripleIn, R.tripleOut, 3] :
+    r < R.doubleIn ? [R.tripleOut, R.doubleIn, 1] :
+    [R.doubleIn, R.doubleOut, 2];
+  return { n: ORDER[i], m, d: sector(r1, r2, i * 18 - 9, i * 18 + 9) };
+}
+
+function toBoard(e) {
+  const svg = $('board');
+  const p = svg.createSVGPoint();
+  p.x = e.clientX; p.y = e.clientY;
+  return p.matrixTransform(svg.getScreenCTM().inverse());
+}
+
+function hitAtEvent(e) {
+  const p = toBoard(e);
+  return hitAt(p.x, p.y);
+}
+
+let aim = null;   // the press currently aiming at the board
+let loupeHl;
+
+function setHl(d) {
+  hl.setAttribute('d', d);
+  loupeHl.setAttribute('d', d);
+}
+
+function updateAim(e) {
+  aim.last = { clientX: e.clientX, clientY: e.clientY };
+  const p = toBoard(e);
+  const h = hitAt(p.x, p.y);
+  setHl(h.d);
+  if (aim.loupe) {
+    const size = 140, zoom = 2.2;
+    const loupe = $('loupe');
+    const w = size / ($('board').getScreenCTM().a * zoom);
+    loupe.querySelector('svg').setAttribute('viewBox', `${p.x - w / 2} ${p.y - w / 2} ${w} ${w}`);
+    loupe.querySelector('.loupe-label').textContent = dartLabel({ ...h, v: h.n * h.m });
+    let top = e.clientY - size - 50;
+    if (top < 8) top = e.clientY + 50;
+    const left = Math.min(Math.max(e.clientX - size / 2, 8), window.innerWidth - size - 8);
+    loupe.style.left = left + 'px';
+    loupe.style.top = top + 'px';
+    loupe.hidden = false;
+  }
+  return h;
+}
+
+function endAim() {
+  if (!aim) return;
+  clearTimeout(aim.timer);
+  aim = null;
+  $('loupe').hidden = true;
+  setHl('');
 }
 
 let flashTimer;
-function flash(node) {
+function flash(d) {
   clearTimeout(flashTimer);
-  hl.setAttribute('d', node.getAttribute('d'));
+  hl.setAttribute('d', d);
   hl.classList.add('flash');
   flashTimer = setTimeout(() => {
     hl.classList.remove('flash');
-    if (!node.matches(':hover')) hl.setAttribute('d', '');
+    hl.setAttribute('d', '');
   }, 180);
-}
-
-// Any tap on the game screen that isn't a control is a throw: a board segment
-// scores, everything else (number ring, empty space around the board) is a miss.
-function onGameTap(e) {
-  if (e.target.closest('button, .player, .overlay')) return;
-  const t = e.target.closest('[data-n]');
-  if (navigator.vibrate) navigator.vibrate(15);
-  if (t) {
-    flash(t);
-    throwDart(+t.dataset.n, +t.dataset.m);
-  } else {
-    throwDart(0, 0);
-  }
 }
 
 // ---------- Dart helpers ----------
@@ -360,6 +513,7 @@ function newGame() {
     turn: [],
     turnStart: setup.start,
     winner: null,
+    pending: false,   // turn finished, waiting for "Next"
   };
   undoStack = [];
 }
@@ -367,16 +521,17 @@ function newGame() {
 function nextLeg() {
   S.leg++;
   S.legStarter = (S.legStarter + 1) % S.players.length;
-  S.players.forEach(p => { p.score = S.start; p.darts = 0; });
+  S.players.forEach(p => { p.score = S.start; p.darts = 0; p.last = null; });
   S.cur = S.legStarter;
   S.turn = [];
   S.turnStart = S.start;
   S.winner = null;
+  S.pending = false;
   undoStack = [];
 }
 
 function throwDart(n, m) {
-  if (!S || S.winner !== null) return;
+  if (!S || S.winner !== null || S.pending) return;
   undoStack.push(JSON.stringify(S));
   if (undoStack.length > 300) undoStack.shift();
 
@@ -388,32 +543,74 @@ function throwDart(n, m) {
   const rem = p.score - d.v;
   const bust = rem < 0 || (S.doubleOut && (rem === 1 || (rem === 0 && m !== 2)));
 
-  if (bust) {
-    p.score = S.turnStart;
-    endTurn(true);
-  } else {
-    p.score = rem;
-    if (rem === 0) {
-      S.winner = S.cur;
-      p.legs++;
-    } else if (S.turn.length === 3) {
-      endTurn(false);
-    }
+  if (bust) p.score = S.turnStart;
+  else p.score = rem;
+  if (bust || rem === 0 || S.turn.length === 3) {
+    finishTurn({
+      labels: S.turn.map(dartLabel),
+      total: S.turn.reduce((s, d) => s + d.v, 0),
+      bust,
+    }, true);
   }
   save();
   render();
 }
 
-function endTurn(bust) {
+// Enter a whole turn as one number. Replaces any darts already tapped this turn.
+function enterTotal(total) {
+  if (!S || S.winner !== null) return;
+  undoStack.push(JSON.stringify(S));
   const p = S.players[S.cur];
-  const total = S.turn.reduce((s, d) => s + d.v, 0);
-  const labels = S.turn.map(dartLabel).join(' ');
-  if (bust) toast(`${p.name}: BUST`, 'bust');
-  else if (total === 180) toast(`${p.name}: ONE HUNDRED AND EIGHTY!`, 'big');
-  else toast(`${p.name}: ${labels} = ${total}`, total >= 100 ? 'big' : '');
+  p.darts += 3 - S.turn.length;
+  p.score = S.turnStart;
+  S.turn = [];
+  const rem = p.score - total;
+  const bust = rem < 0 || (S.doubleOut && rem === 1);
+  if (!bust) p.score = rem;
+  finishTurn({ labels: [], total, bust, typed: true }, false);
+  save();
+  render();
+}
+
+// Remember the turn for the "last turn" info, then win the leg or pass on.
+// With `wait`, the finished turn stays on screen until "Next" is pressed, so
+// whoever entered it can check it (or undo) before play moves on.
+function finishTurn(last, wait) {
+  const p = S.players[S.cur];
+  p.last = last;
+  if (!last.bust && p.score === 0) {
+    S.turn = [];
+    S.winner = S.cur;
+    p.legs++;
+    return;
+  }
+  if (wait) S.pending = true;
+  else nextPlayer();
+}
+
+function nextPlayer() {
+  S.pending = false;
   S.turn = [];
   S.cur = (S.cur + 1) % S.players.length;
   S.turnStart = S.players[S.cur].score;
+}
+
+// The Next button can pop up right under the finger that finished the turn (it
+// sits in the empty area below the board, where misses are tapped). Ignore taps
+// that arrive just after it appears so that same touch can't press it.
+let nextShownAt = 0;
+function confirmTurn() {
+  if (!S || !S.pending || performance.now() - nextShownAt < 400) return;
+  undoStack.push(JSON.stringify(S));
+  nextPlayer();
+  save();
+  render();
+}
+
+function lastText(last) {
+  if (!last) return '';
+  const darts = last.typed ? `${last.total} (typed)` : `${last.labels.join(' ')} = ${last.total}`;
+  return last.bust ? `BUST · ${darts}` : darts;
 }
 
 function undo() {
@@ -456,6 +653,56 @@ function saveEdit(score) {
   render();
 }
 
+// Numpad for typing a turn total.
+const IMPOSSIBLE = new Set([163, 166, 169, 172, 173, 175, 176, 178, 179]);
+function openPad() {
+  if (!S || S.winner !== null || S.pending) return;
+  const p = S.players[S.cur];
+  $('padTitle').textContent = p.name;
+  $('padInput').value = '';
+  updatePad();
+  $('padOverlay').hidden = false;
+  fitPad();
+  $('padInput').focus();   // synchronous with the tap so mobile opens the keyboard
+}
+function closePad() { $('padOverlay').hidden = true; }
+
+// Keep the drawer glued to the visible part of the screen: when the keyboard
+// opens, the visual viewport shrinks (and may scroll), so follow it.
+function fitPad() {
+  const vv = window.visualViewport, o = $('padOverlay');
+  if (!vv || o.hidden) return;
+  o.style.top = vv.offsetTop + 'px';
+  o.style.height = vv.height + 'px';
+}
+function padCheck() {
+  const v = +$('padInput').value || 0;
+  const rem = S.turnStart - v;
+  if (v > 180 || IMPOSSIBLE.has(v)) return { ok: false, msg: `${v} isn't possible with 3 darts`, cls: 'bad' };
+  if (rem === 0) {
+    return S.doubleOut && !checkout(v, 3, true)
+      ? { ok: false, msg: `${v} can't be checked out`, cls: 'bad' }
+      : { ok: true, msg: '', cls: '' };
+  }
+  return { ok: true, msg: '', cls: '' };
+}
+function updatePad() {
+  const input = $('padInput');
+  input.value = input.value.replace(/\D/g, '').slice(0, 3);
+  const c = padCheck();
+  $('padHint').textContent = c.msg;
+  $('padHint').className = `pad-hint ${c.cls}`;
+  $('padOk').disabled = !c.ok;
+}
+function submitPad(e) {
+  e.preventDefault();
+  if (!padCheck().ok) return;
+  const v = +$('padInput').value || 0;
+  $('padInput').blur();
+  closePad();
+  enterTotal(v);
+}
+
 // Points actually scored per 3 darts (busted darts count as thrown).
 function average(p) {
   return p.darts ? ((S.start - p.score) / p.darts * 3).toFixed(1) : '–';
@@ -469,16 +716,25 @@ function render() {
   const inGame = !!S;
   $('setup').hidden = inGame;
   $('game').hidden = !inGame;
-  if (!inGame) return renderSetup();
+  if (!inGame) {
+    // Leaving the game: make sure no game dialog stays on top of the setup screen.
+    for (const id of ['winOverlay', 'padOverlay', 'editOverlay']) $(id).hidden = true;
+    return renderSetup();
+  }
 
-  $('meta').textContent = `${S.start} · ${S.doubleOut ? 'double out' : 'straight out'} · leg ${S.leg}`;
+
+  const cur = S.players[S.cur];
+  const co = S.winner === null ? checkout(cur.score, 3 - S.turn.length, S.doubleOut) : null;
 
   $('players').innerHTML = S.players.map((p, i) => `
     <div class="player ${i === S.cur ? 'active' : ''}" data-i="${i}">
       <div class="name"><span>${esc(p.name)}</span>${p.legs ? `<span class="legs">${p.legs}</span>` : ''}</div>
       <div class="score">${p.score}</div>
       <div class="avg">avg ${average(p)}</div>
+      <div class="last ${p.last && p.last.bust ? 'bust' : ''}">${p.last ? esc(lastText(p.last)) : '&nbsp;'}</div>
     </div>`).join('');
+  centerActivePlayer();
+
 
   const slots = [0, 1, 2].map(i => {
     const d = S.turn[i];
@@ -487,22 +743,38 @@ function render() {
     return `<div class="slot ${cls}">${dartLabel(d)}</div>`;
   });
   const total = S.turn.reduce((s, d) => s + d.v, 0);
-  $('turn').innerHTML = slots.join('') + `<div class="slot total">${total}</div>`;
+  const busted = S.pending && cur.last && cur.last.bust;
+  $('turn').innerHTML = slots.join('') +
+    (busted ? `<div class="slot total bust">BUST</div>` : `<div class="slot total">${total}</div>`);
 
-  const p = S.players[S.cur];
-  const co = S.winner === null ? checkout(p.score, 3 - S.turn.length, S.doubleOut) : null;
-  $('checkout').textContent = co ? `Checkout: ${co.map(dartLabel).join(' · ')}` : '';
+  $('checkout').textContent = co ? co.map(dartLabel).join(' · ') : '';
+
+  $('boardWrap').classList.toggle('locked', !!S.pending);
+  $('game').classList.toggle('pending', !!S.pending);
+  if ($('nextBtn').hidden && S.pending) nextShownAt = performance.now();
+  $('nextBtn').hidden = !S.pending;
+  $('nextBtn').textContent = `Next: ${S.players[(S.cur + 1) % S.players.length].name} →`;
 
   $('undoBtn').disabled = !undoStack.length;
+  $('typeBtn').disabled = S.winner !== null || !!S.pending;
 
   if (S.winner !== null) {
     const w = S.players[S.winner];
+    $('winLabel').textContent = `Leg ${S.leg} won`;
     $('winName').textContent = `🏆 ${w.name}`;
     $('winStats').textContent = `${w.darts} darts · avg ${average(w)}`;
     $('winOverlay').hidden = false;
   } else {
     $('winOverlay').hidden = true;
   }
+}
+
+// Bring the player who's throwing into view in the carousel.
+function centerActivePlayer() {
+  const box = $('players'), card = box.children[S.cur];
+  if (!card || box.scrollWidth <= box.clientWidth) return;
+  const left = card.offsetLeft - box.offsetLeft - (box.clientWidth - card.offsetWidth) / 2;
+  box.scrollLeft = left;
 }
 
 function renderSetup() {
@@ -523,18 +795,8 @@ function renderSetup() {
   $('doubleOut').checked = setup.doubleOut;
 }
 
-let toastTimer;
-function toast(msg, kind) {
-  const t = $('toast');
-  t.textContent = msg;
-  t.className = `toast show ${kind || ''}`;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), 1800);
-}
-
 // ---------- Wiring ----------
 buildBoard($('board'));
-$('game').addEventListener('click', onGameTap);
 
 $('addPlayer').onclick = () => {
   if (setup.names.length >= 8) return;
@@ -552,9 +814,24 @@ $('players').onclick = e => {
   if (card) openEdit(+card.dataset.i);
 };
 $('editForm').onsubmit = e => { e.preventDefault(); saveEdit(Number($('editScore').value)); };
-$('editCancel').onclick = closeEdit;
-$('editReset').onclick = () => saveEdit(S.start);
+$('editOverlay').onclick = e => { if (e.target === e.currentTarget) closeEdit(); };
 $('missBtn').onclick = () => throwDart(0, 0);
+$('nextBtn').onclick = confirmTurn;
+// The strip under the board (outside the SVG) is still part of the board area: a miss.
+$('boardWrap').addEventListener('click', e => {
+  if (e.target !== e.currentTarget) return;
+  if (navigator.vibrate) navigator.vibrate(15);
+  throwDart(0, 0);
+});
+$('typeBtn').onclick = openPad;
+$('padInput').oninput = updatePad;
+$('padForm').onsubmit = submitPad;
+if (window.visualViewport) {
+  visualViewport.addEventListener('resize', fitPad);
+  visualViewport.addEventListener('scroll', fitPad);
+}
+// Tapping the dimmed area around the drawer closes it.
+$('padOverlay').onclick = e => { if (e.target === e.currentTarget) { $('padInput').blur(); closePad(); } };
 $('undoBtn').onclick = undo;
 $('winUndoBtn').onclick = undo;
 $('nextLegBtn').onclick = () => { nextLeg(); save(); render(); };
