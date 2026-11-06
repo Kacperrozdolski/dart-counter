@@ -4,6 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#111418">
+<!-- "Add to Home Screen": opens full screen, without the browser's bars (more room for the board). -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Darts">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icon-192.png">
 <title>Dart Counter</title>
 <style>
   :root {
@@ -66,6 +74,18 @@
     font-weight: 700; font-size: 18px;
   }
 
+  /* Start button stays pinned to the bottom of the screen: pushed down when the
+     setup is short, and kept in view (over the scrolling cards) when it's long. */
+  /* A full-width bottom bar that fades in from transparent: no hard edge or
+     dark band around the button. */
+  .start-bar {
+    position: sticky; bottom: 0; z-index: 1; margin: auto -16px 0;
+    padding: 20px 16px max(16px, env(safe-area-inset-bottom));
+    background: linear-gradient(to bottom, rgba(17, 20, 24, 0), var(--bg) 20px);
+    display: flex; flex-direction: column;
+  }
+  #setup { padding-bottom: 0; }   /* the bar brings its own bottom spacing */
+
   /* ---------- Game ---------- */
   .link { border: 0; background: none; color: var(--muted); padding: 6px 0; }
   .player { cursor: pointer; }
@@ -101,14 +121,6 @@
     .player .score { transition: transform .25s ease, color .25s ease; }
   }
   .player .avg { font-size: 12px; color: var(--muted); }
-  /* Checkout sits centred in the gap between the board and the buttons. The board
-     area always keeps at least 24px under the board for it, so nothing shifts
-     when it appears. Taps there still count as a miss (it ignores the pointer). */
-  .checkout {
-    position: absolute; left: 0; right: 0; height: 24px; line-height: 24px; pointer-events: none;
-    top: calc((min(100cqw, 100cqh - 24px) + 100cqh) / 2); transform: translateY(-50%);
-    text-align: center; color: var(--accent); font-weight: 700; font-size: 16px; letter-spacing: .02em;
-  }
 
   .turn { display: flex; gap: 8px; align-items: stretch; }
   .slot {
@@ -123,15 +135,15 @@
   .player .last.bust { color: var(--danger); }
 
   #game.wrap { max-width: 900px; height: 100dvh; min-height: 0; gap: 10px; }
-  .board-wrap { position: relative; flex: 1; min-height: 280px; margin: 24px -12px 0; container-type: size; }
+  /* The board takes whatever height is left and shrinks to fit: the game screen
+     never scrolls, so the buttons below always stay on screen. */
+  .board-wrap { position: relative; flex: 1; min-height: 0; margin: 0 -12px; }
   .exit-btn {
     align-self: flex-start; flex-shrink: 0; width: 30px; height: 30px; margin-bottom: 14px; border: 0; border-radius: 50%;
     background: var(--panel); color: var(--muted); font-size: 14px; line-height: 1;
   }
-  /* Line up with the left edge of the (centred, max 520px) player cards on wide screens. */
-  #game .exit-btn { margin-left: max(0px, calc((100% - 520px) / 2)); }
   svg.board { touch-action: none; }
-  svg.board { position: absolute; top: 0; left: 0; width: 100%; height: calc(100% - 24px); display: block; }
+  svg.board { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; }
   #game .players, #game .turn, #game .actions { width: 100%; max-width: 520px; margin: 0 auto; }
   svg.board { cursor: pointer; }
   .board-art .hl { fill: #fff; fill-opacity: .28; stroke: var(--accent); stroke-width: 2.5; pointer-events: none; transition: fill-opacity .12s; }
@@ -216,11 +228,94 @@
 
   .overlay {
     position: fixed; inset: 0; background: rgba(0,0,0,.7); display: flex; align-items: center; justify-content: center;
-    padding: 16px; z-index: 20;
+    z-index: 20;
+    /* Clear of the notch / status bar too (the home-screen app draws under it). */
+    padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+             max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
   }
   .overlay .card { width: 100%; max-width: 380px; text-align: center; }
   .overlay h2 { margin: 4px 0; font-size: 28px; }
   .overlay .stats { color: var(--muted); }
+
+  .overlay .actions.three { grid-template-columns: repeat(3, 1fr); }
+  .standings { margin-top: 4px; color: var(--text); }
+
+  /* ---------- Top bar ---------- */
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-shrink: 0;
+    width: 100%; max-width: 520px; margin: 0 auto 14px;
+  }
+  .topbar .exit-btn { margin: 0; }
+  .match-info { color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .match-info.co { color: var(--accent); font-weight: 700; font-size: 16px; letter-spacing: .02em; }
+  .top-btn {
+    height: 30px; padding: 0 14px; border: 0; border-radius: 15px; background: var(--panel);
+    color: var(--muted); font-size: 13px; font-weight: 600; flex-shrink: 0;
+  }
+
+  /* ---------- History / heatmap sheet ---------- */
+  /* Fixed height, so switching tabs/legs/players never resizes or re-centres the
+     sheet; content scrolls inside it instead. */
+  /* Header and footer stay put; only the body in between scrolls. */
+  #statsOverlay .card {
+    max-width: 520px; height: min(100%, 820px); padding: 0; gap: 0; overflow: hidden; text-align: left;
+  }
+  .sheet-top, .sheet-foot { flex-shrink: 0; display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+  .sheet-top { border-bottom: 1px solid var(--panel-2); }
+  .sheet-foot { border-top: 1px solid var(--panel-2); }
+  .sheet-body {
+    flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+    display: flex; flex-direction: column; gap: 10px; padding: 12px 16px 16px;
+  }
+  .sheet-body > * { flex-shrink: 0; }
+  .sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: -4px 0 0; }
+  .sheet-head h3 { margin: 0; font-size: 18px; }
+  .sheet-x {
+    width: 36px; height: 36px; flex-shrink: 0; border: 0; border-radius: 50%;
+    background: var(--panel-2); color: var(--text); font-size: 15px; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+  }
+  /* In-app confirm (replaces the browser's native confirm box). */
+  #confirmOverlay { z-index: 30; }
+  #confirmOverlay .card { max-width: 340px; }
+  .confirm-title { margin: 4px 0 0; font-size: 22px; }
+  .actions .danger { background: var(--danger); color: #fff; }
+  .sheet-close { height: 52px; border: 0; border-radius: 12px; background: var(--panel-2); font-weight: 700; font-size: 16px; }
+  .seg.scroll { overflow-x: auto; scrollbar-width: none; }
+  .seg.scroll::-webkit-scrollbar { display: none; }
+  .seg.scroll button { flex: 1 0 auto; padding: 8px 12px; white-space: nowrap; }
+  .stats-empty { color: var(--muted); text-align: center; padding: 24px 0; }
+  .sum { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 14px; }
+  .sum th { color: var(--muted); font-weight: 600; font-size: 12px; text-align: right; padding: 0 0 4px 8px; }
+  .sum td { text-align: right; padding: 3px 0 3px 8px; }
+  .sum th:first-child, .sum td:first-child { text-align: left; padding-left: 0; max-width: 0; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sum tr.won td:first-child { color: var(--accent); font-weight: 700; }   /* leg winner */
+  .h-round { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; margin: 10px 0 2px; }
+  .h-row {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto 3.2em 3.2em; gap: 10px; align-items: baseline;
+    padding: 6px 0; border-bottom: 1px solid var(--panel-2); font-variant-numeric: tabular-nums;
+  }
+  .h-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .h-darts { color: var(--muted); font-size: 14px; }
+  .h-total { text-align: right; font-weight: 700; }
+  .h-left { text-align: right; color: var(--muted); }
+  .h-row.bust .h-total { color: var(--danger); font-size: 13px; }
+  .h-row.out .h-total, .h-row.out .h-left { color: #3ecf7f; }
+  .h-row.live { border-bottom-style: dashed; }   /* turn still in progress */
+  .h-row.live .h-name { color: var(--accent); }
+  .heat-board { width: 100%; max-width: 380px; aspect-ratio: 1; display: block; margin: 0 auto; }
+  .heat-board > :not(.heat):not(defs) { opacity: .4; }
+  .heat .pin { fill: #fff; stroke: #000; stroke-width: .8; }
+  /* "Most hit": simple grid of tiles, 4 per row, most hit first. */
+  .hits { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .hit {
+    background: var(--panel-2); border-radius: 10px; padding: 8px 4px; text-align: center;
+    display: flex; flex-direction: column; gap: 2px; font-variant-numeric: tabular-nums;
+  }
+  .hit-l { font-weight: 800; font-size: 18px; }
+  .hit-n { color: var(--muted); font-size: 13px; }
+  .hit.miss .hit-l { color: #ff8589; }
+  .note { color: var(--muted); font-size: 13px; }
 
   #padOverlay, #editOverlay { inset: auto 0 auto 0; top: 0; height: 100%; }
   #padOverlay { align-items: flex-end; padding: 0; }
@@ -228,13 +323,60 @@
     max-width: 520px; border-radius: 18px 18px 0 0;
     padding-bottom: calc(16px + env(safe-area-inset-bottom));
   }
+
+  /* ---------- Responsive overrides (last, so they win over the rules above) ---------- */
+
+  /* Short screens (iPhone SE, any phone with Safari's bars showing): everything
+     around the board goes compact so the board gets the height. */
+  @media (max-height: 740px) {
+    #game.wrap { gap: 8px; padding-top: max(10px, env(safe-area-inset-top)); padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+    .topbar { margin-bottom: 2px; }
+    .player { padding: 6px 10px 8px; gap: 0; }
+    .player .avg { display: none; }   /* in History; the last turn stays */
+    .player .score { font-size: 34px; }
+    .slot { min-height: 40px; font-size: 18px; }
+    .slot.total { font-size: 20px; }
+    #game .actions button { height: 48px; }
+    .fab { height: 52px; }
+    /* Stats sheet: tighter header/footer so the scrolling body keeps its room. */
+    .sheet-top, .sheet-foot { padding: 12px; gap: 8px; }
+    .sheet-body { padding: 10px 12px 12px; }
+    .sheet-x { width: 32px; height: 32px; }
+    .sheet-close { height: 44px; }
+    .sheet-top .seg button { padding: 7px 10px; }
+  }
+
+  /* Phones on their side: board on the left at full height, everything else in a
+     column on the right (stacked, the board would be a few dozen pixels tall). */
+  @media (orientation: landscape) and (max-height: 540px) {
+    #game.wrap {
+      display: grid; max-width: none; gap: 8px 16px;
+      grid-template-columns: minmax(0, 1fr) clamp(260px, 42vw, 380px);
+      grid-template-rows: auto auto auto 1fr auto;
+      grid-template-areas: "board top" "board players" "board turn" "board ." "board actions";
+      padding: max(8px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+               max(8px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    }
+    .topbar { grid-area: top; margin: 0; }
+    #game .players { grid-area: players; }
+    #game .turn { grid-area: turn; }
+    #game .actions { grid-area: actions; grid-template-columns: repeat(3, 1fr); }
+    #game .actions button { font-size: 14px; padding: 0 4px; }
+    #game .actions .miss { font-size: 16px; }
+    .players .player { flex-basis: 110px; }
+    .board-wrap { grid-area: board; margin: 0; }
+    /* Very little height: the whole stats sheet scrolls, header and footer included. */
+    #statsOverlay .card { overflow-y: auto; }
+    .sheet-body { flex: none; min-height: auto; overflow: visible; }
+    .overlay { padding-top: max(8px, env(safe-area-inset-top)); padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+  }
 </style>
 </head>
 <body>
 
 <!-- Setup screen -->
 <div id="setup" class="wrap">
-  <h1>🎯 Dart Counter</h1>
+  <h1>Dart Counter</h1>
   <div class="card">
     <div class="label">Players</div>
     <div id="playerInputs" style="display:flex;flex-direction:column;gap:8px"></div>
@@ -249,15 +391,29 @@
     </div>
     <label class="toggle"><span>Double out</span><input type="checkbox" id="doubleOut"></label>
   </div>
-  <button class="primary" id="startBtn">Start game</button>
+  <div class="card">
+    <div class="label">Legs to win the match</div>
+    <div class="seg" id="legsSeg">
+      <button data-v="1">1</button>
+      <button data-v="2">2</button>
+      <button data-v="3">3</button>
+      <button data-v="4">4</button>
+      <button data-v="5">5</button>
+    </div>
+  </div>
+  <div class="start-bar"><button class="primary" id="startBtn">Start game</button></div>
 </div>
 
 <!-- Game screen -->
 <div id="game" class="wrap" hidden>
-  <button class="exit-btn" id="quitBtn" aria-label="Leave game">✕</button>
+  <div class="topbar">
+    <button class="exit-btn" id="quitBtn" aria-label="Leave game">✕</button>
+    <span class="match-info" id="matchInfo"></span>
+    <button class="top-btn" id="histBtn">History</button>
+  </div>
   <div class="players" id="players"></div>
   <div class="turn" id="turn"></div>
-  <div class="board-wrap" id="boardWrap"><button class="fab" id="nextBtn" hidden></button><svg class="board board-art" id="board" viewBox="-213 -213 426 426" preserveAspectRatio="xMidYMin meet"></svg><div class="checkout" id="checkout"></div></div>
+  <div class="board-wrap" id="boardWrap"><button class="fab" id="nextBtn" hidden></button><svg class="board board-art" id="board" viewBox="-213 -213 426 426" preserveAspectRatio="xMidYMid meet"></svg></div>
   <div class="actions">
     <button id="typeBtn">Type score</button>
     <button class="miss" id="missBtn">MISS</button>
@@ -292,9 +448,44 @@
     <h2 id="winName"></h2>
     <div class="stats" id="winStats"></div>
     <button class="primary" id="nextLegBtn">Next leg</button>
-    <div class="actions">
-      <button id="winUndoBtn">Undo</button>
+    <button class="primary" id="rematchBtn" hidden>Rematch</button>
+    <div class="actions" id="winActions">
+      <button id="winHistBtn">History</button>
       <button id="newGameBtn">New game</button>
+      <!-- Last, so it sits bottom-right like the Undo button on the game screen. -->
+      <button id="winUndoBtn">Undo</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="confirmOverlay" hidden>
+  <div class="card">
+    <h3 class="confirm-title" id="confirmTitle"></h3>
+    <div class="stats" id="confirmText"></div>
+    <div class="actions">
+      <button id="confirmNo">Cancel</button>
+      <button class="danger" id="confirmYes"></button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="statsOverlay" hidden>
+  <div class="card">
+    <div class="sheet-top">
+      <div class="sheet-head">
+        <h3>Match stats</h3>
+        <button class="sheet-x" id="statsX" aria-label="Close">✕</button>
+      </div>
+      <div class="seg" id="statsTabs">
+        <button data-t="history">History</button>
+        <button data-t="heat">Heatmap</button>
+      </div>
+      <div class="seg scroll" id="legTabs"></div>
+      <div class="seg scroll" id="playerTabs"></div>
+    </div>
+    <div class="sheet-body" id="statsBody"></div>
+    <div class="sheet-foot">
+      <button class="sheet-close" id="statsClose">Close</button>
     </div>
   </div>
 </div>
@@ -360,9 +551,10 @@ function buildBoard(svg) {
   el('path', { d: disc(R.outerBull), fill: 'var(--board-green)', class: 'wire', 'data-n': 25, 'data-m': 1 }, svg);
   el('path', { d: disc(R.bull), fill: 'var(--board-red)', class: 'wire', 'data-n': 25, 'data-m': 2 }, svg);
 
-  // Magnifier: a copy of the board that follows the finger.
+  // Magnifier: a copy of the board that follows the finger. The heatmap reuses it too.
+  boardArt = svg.innerHTML;
   const loupeSvg = $('loupe').querySelector('svg');
-  loupeSvg.innerHTML = svg.innerHTML;
+  loupeSvg.innerHTML = boardArt;
   markers = el('g', { class: 'markers' }, svg);
   hl = el('path', { class: 'hl', d: '' }, svg);
   loupeHl = el('path', { class: 'hl', d: '' }, loupeSvg);
@@ -424,6 +616,7 @@ function hitAtEvent(e) {
   return hitAt(p.x, p.y);
 }
 
+let boardArt = '';  // static board markup, for the loupe and the heatmap
 let aim = null;   // the press currently aiming at the board
 let markers;      // <g> holding this turn's hit markers
 let loupeHl;
@@ -521,7 +714,7 @@ function checkout(rem, dartsLeft, doubleOut) {
 const STORE_KEY = 'dart-counter-v1';
 let S = null;          // current game state
 let undoStack = [];    // snapshots of S taken before each dart
-let setup = { names: ['Player 1', 'Player 2'], start: 501, doubleOut: true };
+let setup = { names: ['Player 1', 'Player 2'], start: 501, doubleOut: true, firstTo: 3 };
 
 function save() {
   try { localStorage.setItem(STORE_KEY, JSON.stringify({ S, undoStack, setup })); } catch {}
@@ -529,8 +722,18 @@ function save() {
 function load() {
   try {
     const data = JSON.parse(localStorage.getItem(STORE_KEY));
-    if (data) { S = data.S; undoStack = data.undoStack || []; setup = data.setup || setup; }
+    if (data) { S = data.S; undoStack = data.undoStack || []; setup = { ...setup, ...data.setup }; }
+    // Games saved before match/history support.
+    if (S) { S.firstTo ??= 1; S.log ??= []; S.done ??= []; }
   } catch {}
+}
+
+// Undo snapshots leave out finished legs (`done`), which keeps each one small
+// however long the match runs. `done` only ever grows ("Next leg" appends), so
+// a snapshot just records how many legs were finished and undo cuts back to that.
+function snap() {
+  undoStack.push(JSON.stringify({ ...S, done: undefined, doneLen: S.done.length }));
+  if (undoStack.length > 300) undoStack.shift();
 }
 
 function newGame() {
@@ -547,11 +750,37 @@ function newGame() {
     turnStart: setup.start,
     winner: null,
     pending: false,   // turn finished, waiting for "Next"
+    matchStarter: 0,  // who threw first in leg 1
+    firstTo: setup.firstTo,   // legs needed to win the match
+    matchOver: false,
+    log: [],          // finished turns of this leg
+    done: [],         // earlier legs: { leg, winner, log }
   };
   undoStack = [];
 }
 
+// Same players and settings; the next player in line throws first.
+function rematch() {
+  const prev = S;
+  setup = {
+    ...setup,
+    names: prev.players.map(p => p.name),
+    start: prev.start,
+    doubleOut: prev.doubleOut,
+    firstTo: prev.firstTo,
+  };
+  newGame();
+  S.matchStarter = S.legStarter = S.cur = ((prev.matchStarter || 0) + 1) % S.players.length;
+  // The finished match stays one Undo away, history and heatmap included (a
+  // full snapshot, `done` and all), in case Rematch was tapped by accident.
+  undoStack = [JSON.stringify(prev)];
+}
+
 function nextLeg() {
+  if (S.matchOver) return;
+  snap();   // undoable: a wrongly entered checkout can still be fixed
+  S.done.push({ leg: S.leg, winner: S.winner, log: S.log });
+  S.log = [];
   S.leg++;
   S.legStarter = (S.legStarter + 1) % S.players.length;
   S.players.forEach(p => { p.score = S.start; p.darts = 0; p.last = null; });
@@ -560,14 +789,12 @@ function nextLeg() {
   S.turnStart = S.start;
   S.winner = null;
   S.pending = false;
-  undoStack = [];
 }
 
 // `at` is the tapped board position, if the dart came from the board.
 function throwDart(n, m, at) {
   if (!S || S.winner !== null || S.pending) return;
-  undoStack.push(JSON.stringify(S));
-  if (undoStack.length > 300) undoStack.shift();
+  snap();
 
   const p = S.players[S.cur];
   const d = { n, m, v: n * m };
@@ -599,7 +826,7 @@ function throwDart(n, m, at) {
 // Enter a whole turn as one number. Replaces any darts already tapped this turn.
 function enterTotal(total) {
   if (!S || S.winner !== null) return;
-  undoStack.push(JSON.stringify(S));
+  snap();
   const p = S.players[S.cur];
   p.darts += 3 - S.turn.length;
   p.score = S.turnStart;
@@ -618,10 +845,21 @@ function enterTotal(total) {
 function finishTurn(last, wait) {
   const p = S.players[S.cur];
   p.last = last;
-  if (!last.bust && p.score === 0) {
+  const out = !last.bust && p.score === 0;
+  S.log.push({
+    p: S.cur,
+    darts: last.typed ? [] : S.turn.slice(),
+    total: last.total,
+    bust: last.bust,
+    typed: !!last.typed,
+    left: p.score,
+    out,
+  });
+  if (out) {
     S.turn = [];
     S.winner = S.cur;
     p.legs++;
+    if (p.legs >= S.firstTo) S.matchOver = true;
     return;
   }
   if (wait) S.pending = true;
@@ -641,7 +879,7 @@ function nextPlayer() {
 let nextShownAt = 0;
 function confirmTurn() {
   if (!S || !S.pending || performance.now() - nextShownAt < 400) return;
-  undoStack.push(JSON.stringify(S));
+  snap();
   nextPlayer();
   save();
   render();
@@ -655,7 +893,13 @@ function lastText(last) {
 
 function undo() {
   if (!undoStack.length) return;
-  S = JSON.parse(undoStack.pop());
+  const s = JSON.parse(undoStack.pop());
+  // Ordinary snapshots leave out finished legs: rebuild them from the current
+  // list (older saves have no doneLen and never changed it). A Rematch snapshot
+  // carries its own.
+  if (!s.done) s.done = s.doneLen == null ? S.done : S.done.slice(0, s.doneLen);
+  delete s.doneLen;
+  S = s;
   save();
   render();
 }
@@ -682,13 +926,24 @@ function saveEdit(score) {
     $('editScore').classList.add('bad');
     return;
   }
-  undoStack.push(JSON.stringify(S));
+  snap();
   p.name = $('editName').value.trim() || p.name;
-  // Keep the bust baseline in sync if we edit the player mid-turn.
-  if (editing === S.cur) S.turnStart += score - p.score;
-  p.score = score;
-  // Editing the leg winner's score reopens the leg.
-  if (S.winner === editing) { S.winner = null; p.legs--; }
+  if (S.winner === editing) {
+    // Editing the leg winner's score reopens the leg: the "checkout" becomes an
+    // ordinary turn ending on the corrected score, and play passes on as usual
+    // (so the bust baseline and History's rounds stay right).
+    S.winner = null;
+    S.matchOver = false;
+    p.legs--;
+    p.score = score;
+    const lastTurn = S.log[S.log.length - 1];
+    if (lastTurn && lastTurn.out) { lastTurn.out = false; lastTurn.left = score; }
+    nextPlayer();
+  } else {
+    // Keep the bust baseline in sync if we edit the player mid-turn.
+    if (editing === S.cur) S.turnStart += score - p.score;
+    p.score = score;
+  }
   closeEdit();
   save();
   render();
@@ -723,10 +978,12 @@ function padCheck() {
   const v = +$('padInput').value || 0;
   const rem = S.turnStart - v;
   if (v > 180 || IMPOSSIBLE.has(v)) return { ok: false, msg: `${v} isn't possible with 3 darts`, cls: 'bad' };
-  if (rem === 0) {
-    return S.doubleOut && !checkout(v, 3, true)
-      ? { ok: false, msg: `${v} can't be checked out`, cls: 'bad' }
-      : { ok: true, msg: '', cls: '' };
+  if (rem === 0 && S.doubleOut && !checkout(v, 3, true)) {
+    return { ok: false, msg: `${v} can't be checked out`, cls: 'bad' };
+  }
+  // A typed total replaces darts already tapped this turn: say so, not silently.
+  if (S.turn.length) {
+    return { ok: true, msg: `Replaces ${S.turn.map(dartLabel).join(' ')} entered this turn`, cls: '' };
   }
   return { ok: true, msg: '', cls: '' };
 }
@@ -759,16 +1016,19 @@ const esc = s => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '
 // One-shot animation hints from the last action; consumed by the next render so
 // re-renders (undo, edits, reloads) never replay them.
 let fx = null;
+// The leg/match result dialog was tapped away (until the leg changes).
+let winDismissed = false;
 
 function render() {
   const f = fx;
   fx = null;
   const inGame = !!S;
+  keepAwake();
   $('setup').hidden = inGame;
   $('game').hidden = !inGame;
   if (!inGame) {
     // Leaving the game: make sure no game dialog stays on top of the setup screen.
-    for (const id of ['winOverlay', 'padOverlay', 'editOverlay']) $(id).hidden = true;
+    for (const id of ['winOverlay', 'padOverlay', 'editOverlay', 'statsOverlay', 'confirmOverlay']) $(id).hidden = true;
     return renderSetup();
   }
 
@@ -796,29 +1056,48 @@ function render() {
   $('turn').innerHTML = slots.join('') +
     (busted ? `<div class="slot total bust ${f && f.bust ? 'shake' : ''}">BUST</div>` : `<div class="slot total">${total}</div>`);
 
-  $('checkout').textContent = co ? co.map(dartLabel).join(' · ') : '';
+  // The checkout route takes the top bar's centre while there is one (legs are on the cards).
+  $('matchInfo').textContent = co ? co.map(dartLabel).join(' · ')
+    : S.firstTo > 1 ? `Leg ${S.leg} · first to ${S.firstTo}` : `Leg ${S.leg}`;
+  $('matchInfo').classList.toggle('co', !!co);
   // Light up the board numbers the checkout route uses.
   const coNums = new Set((co || []).map(d => d.n));
   for (const t of $('board').querySelectorAll('.num')) t.classList.toggle('co', coNums.has(+t.dataset.num));
 
-  $('boardWrap').classList.toggle('locked', !!S.pending);
+  $('boardWrap').classList.toggle('locked', !!S.pending || S.winner !== null);
   // Drop any leftover hover on a locked board (but let the last dart's flash play).
   if ((S.pending || S.winner !== null) && !hl.classList.contains('flash')) setHl('');
-  $('game').classList.toggle('pending', !!S.pending);
+  $('game').classList.toggle('pending', !!S.pending || S.winner !== null);
+  // The same floating button either passes the turn on or, after the result
+  // dialog was tapped away, brings it back.
+  const showResult = S.winner !== null && winDismissed;
   if ($('nextBtn').hidden && S.pending) nextShownAt = performance.now();
-  $('nextBtn').hidden = !S.pending;
-  $('nextBtn').textContent = `Next: ${S.players[(S.cur + 1) % S.players.length].name} →`;
+  $('nextBtn').hidden = !S.pending && !showResult;
+  $('nextBtn').textContent = showResult
+    ? (S.matchOver ? 'Match result →' : 'Leg result →')
+    : `Next: ${S.players[(S.cur + 1) % S.players.length].name} →`;
 
   $('undoBtn').disabled = !undoStack.length;
   $('typeBtn').disabled = S.winner !== null || !!S.pending;
 
   if (S.winner !== null) {
     const w = S.players[S.winner];
-    $('winLabel').textContent = `Leg ${S.leg} won`;
-    $('winName').textContent = `🏆 ${w.name}`;
-    $('winStats').textContent = `${w.darts} darts · avg ${average(w)}`;
-    $('winOverlay').hidden = false;
+    const over = !!S.matchOver;
+    $('winLabel').textContent = over && S.firstTo > 1 ? `Match won · leg ${S.leg}` : `Leg ${S.leg} won`;
+    $('winName').textContent = w.name;
+    $('winStats').innerHTML = `${w.darts} darts · avg ${average(w)}` + (S.firstTo > 1
+      ? `<div class="standings">${S.players.map(p => `${esc(p.name)} <b>${p.legs}</b>`).join(' · ')}</div>`
+      : '');
+    $('nextLegBtn').hidden = over;
+    $('rematchBtn').hidden = !over;
+    // Mid-match there's no "New game" here: one stray tap would throw the match
+    // away. Leaving early goes through the ✕ (with a confirm).
+    $('newGameBtn').hidden = !over;
+    $('winActions').classList.toggle('three', over);
+    // Only one dialog at a time: the result steps aside while History is open.
+    $('winOverlay').hidden = winDismissed || !$('statsOverlay').hidden || !$('confirmOverlay').hidden;
   } else {
+    winDismissed = false;
     $('winOverlay').hidden = true;
   }
 }
@@ -840,7 +1119,7 @@ function renderPlayers() {
     const card = box.children[i];
     card.classList.toggle('active', i === S.cur);
     card.querySelector('.name span').textContent = p.name;
-    card.querySelector('.legs').textContent = p.legs || '';
+    card.querySelector('.legs').textContent = S.firstTo > 1 ? `${p.legs}/${S.firstTo}` : (p.legs || '');
     card.querySelector('.score').textContent = p.score;
     card.querySelector('.avg').textContent = `avg ${average(p)}`;
     const last = card.querySelector('.last');
@@ -871,8 +1150,161 @@ function renderSetup() {
     });
     box.appendChild(row);
   });
-  $('startSeg').querySelectorAll('button').forEach(b => b.classList.toggle('on', +b.dataset.v === setup.start));
+  segOn($('startSeg'), b => +b.dataset.v === setup.start);
   $('doubleOut').checked = setup.doubleOut;
+  segOn($('legsSeg'), b => +b.dataset.v === setup.firstTo);
+}
+
+// Mark the chosen button of a segmented control, visibly and for screen readers.
+function segOn(box, isOn) {
+  for (const b of box.querySelectorAll('button')) {
+    const on = !!isOn(b);
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', on);
+  }
+}
+
+// ---------- History & heatmap ----------
+// view.leg is 'all' (heatmap only) or a leg number as a string.
+let view = { tab: 'history', leg: 'all', player: 'all' };
+
+function allLegs() {
+  return [...S.done, { leg: S.leg, winner: S.winner, log: S.log }];
+}
+
+function openStats(tab) {
+  view = { tab, leg: tab === 'heat' ? 'all' : String(S.leg), player: 'all' };
+  $('statsOverlay').hidden = false;
+  renderStats();
+  render();   // hides the result dialog underneath
+}
+// In-app replacement for confirm(). Like History, it takes the result dialog's
+// place while open, so dialogs never stack.
+let confirmAction = null;
+function askConfirm(title, text, yesLabel, action) {
+  $('confirmTitle').textContent = title;
+  $('confirmText').textContent = text;
+  $('confirmYes').textContent = yesLabel;
+  confirmAction = action;
+  $('confirmOverlay').hidden = false;
+  if (S) render();
+}
+function closeConfirm() {
+  confirmAction = null;
+  $('confirmOverlay').hidden = true;
+  if (S) render();
+}
+
+// ---------- Keep the screen awake during a game ----------
+// Phones dim and lock mid-match otherwise. The browser drops the lock whenever
+// the page is hidden, so it's re-requested on every render and when the page
+// becomes visible again. Needs HTTPS; silently does nothing where unsupported.
+let wakeLock = null, wakeReq = null;
+function keepAwake() {
+  if (!('wakeLock' in navigator)) return;
+  const want = !!S && document.visibilityState === 'visible';
+  if (want && !wakeLock && !wakeReq) {
+    wakeReq = navigator.wakeLock.request('screen')
+      .then(lock => {
+        wakeLock = lock;
+        lock.addEventListener('release', () => { if (wakeLock === lock) wakeLock = null; });
+        if (!S) keepAwake();   // the game ended while we were waiting: let go again
+      })
+      .catch(() => {})
+      .finally(() => { wakeReq = null; });
+  } else if (!want && wakeLock) {
+    const lock = wakeLock;
+    wakeLock = null;
+    lock.release().catch(() => {});
+  }
+}
+document.addEventListener('visibilitychange', keepAwake);
+
+// Back to whatever was showing before, e.g. the leg/match result.
+function closeStats() { $('statsOverlay').hidden = true; if (S) render(); }
+
+function tabs(box, items, current, attr) {
+  box.innerHTML = items.map(([v, label]) =>
+    `<button data-${attr}="${v}" class="${v === current ? 'on' : ''}" aria-pressed="${v === current}">${esc(label)}</button>`).join('');
+}
+
+function renderStats() {
+  const legs = allLegs();
+  const heat = view.tab === 'heat';
+  segOn($('statsTabs'), b => b.dataset.t === view.tab);
+
+  const legItems = [...(heat ? [['all', 'All legs']] : []), ...legs.map(l => [String(l.leg), `Leg ${l.leg}`])];
+  if (!legItems.some(([v]) => v === view.leg)) view.leg = heat ? 'all' : String(S.leg);
+  tabs($('legTabs'), legItems, view.leg, 'leg');
+  $('legTabs').hidden = legs.length < 2;
+
+  tabs($('playerTabs'), [['all', 'All'], ...S.players.map((p, i) => [String(i), p.name])], view.player, 'player');
+  $('playerTabs').hidden = !heat || S.players.length < 2;
+
+  const picked = view.leg === 'all' ? legs : legs.filter(l => String(l.leg) === view.leg);
+  $('statsBody').innerHTML = heat ? heatHTML(picked) : historyHTML(picked[0]);
+  $('statsBody').scrollTop = 0;   // new tab/leg/player: start from the top
+}
+
+function historyHTML(L) {
+  // The turn being thrown right now (current leg only), shown after the finished ones.
+  const live = L && L.leg === S.leg && S.winner === null && !S.pending && S.turn.length ? S.turn : null;
+  if (!L || (!L.log.length && !live)) return `<div class="stats-empty">No turns yet in this leg</div>`;
+  const n = S.players.length;
+  const rows = S.players.map((p, i) => {
+    const turns = L.log.filter(t => t.p === i);
+    const darts = turns.reduce((s, t) => s + (t.typed ? 3 : t.darts.length), 0);
+    const ok = turns.filter(t => !t.bust);
+    const scored = ok.reduce((s, t) => s + t.total, 0);
+    const best = ok.length ? Math.max(...ok.map(t => t.total)) : '–';
+    const avg = darts ? (scored / darts * 3).toFixed(1) : '–';
+    return `<tr${L.winner === i ? ' class="won"' : ''}><td>${esc(p.name)}</td><td>${darts}</td><td>${avg}</td><td>${best}</td></tr>`;
+  });
+  let html = `<table class="sum"><tr><th>Player</th><th>Darts</th><th>Avg</th><th>Best</th></tr>${rows.join('')}</table><div>`;
+  L.log.forEach((t, i) => {
+    if (i % n === 0) html += `<div class="h-round">Round ${i / n + 1}</div>`;
+    const darts = t.typed ? 'typed' : t.darts.map(dartLabel).join(' ');
+    html += `<div class="h-row${t.bust ? ' bust' : ''}${t.out ? ' out' : ''}">
+      <span class="h-name">${esc(S.players[t.p].name)}</span><span class="h-darts">${darts}</span>
+      <span class="h-total">${t.bust ? 'BUST' : t.total}</span><span class="h-left">${t.out ? '✓' : t.left}</span></div>`;
+  });
+  if (live) {
+    const i = L.log.length;
+    if (i % n === 0) html += `<div class="h-round">Round ${i / n + 1}</div>`;
+    html += `<div class="h-row live">
+      <span class="h-name">${esc(S.players[S.cur].name)}</span><span class="h-darts">${live.map(dartLabel).join(' ')} …</span>
+      <span class="h-total">${live.reduce((s, d) => s + d.v, 0)}</span><span class="h-left">${S.players[S.cur].score}</span></div>`;
+  }
+  return html + '</div>';
+}
+
+function heatHTML(legs) {
+  const turns = legs.flatMap(l => l.log).filter(t => view.player === 'all' || String(t.p) === view.player);
+  const darts = turns.flatMap(t => t.darts);
+  const pts = darts.filter(d => d.x != null);
+
+  const blobs = pts.map(d => `<circle cx="${d.x}" cy="${d.y}" r="20" fill="url(#heatDot)"></circle>`).join('');
+  const pins = pts.map(d => `<circle class="pin" cx="${d.x}" cy="${d.y}" r="2.5"></circle>`).join('');
+  const svg = `<svg class="board-art heat-board" viewBox="-213 -213 426 426">
+    <defs><radialGradient id="heatDot">
+      <stop offset="0" stop-color="#ff3b1f" stop-opacity=".6"></stop>
+      <stop offset=".5" stop-color="#ffb000" stop-opacity=".25"></stop>
+      <stop offset="1" stop-color="#ffb000" stop-opacity="0"></stop>
+    </radialGradient></defs>${boardArt}<g class="heat">${blobs}${pins}</g></svg>`;
+
+  // Most-hit beds (misses included), counting every dart with a known segment.
+  const counts = new Map();
+  for (const d of darts) counts.set(dartLabel(d), (counts.get(dartLabel(d)) || 0) + 1);
+  const top = [...counts].sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const hits = top.map(([l, c]) => `
+    <div class="hit${l === 'MISS' ? ' miss' : ''}">
+      <span class="hit-l">${l === 'MISS' ? 'Miss' : l}</span>
+      <span class="hit-n">×${c} · ${Math.round(c / darts.length * 100)}%</span>
+    </div>`).join('');
+
+  return svg +
+    (top.length ? `<div class="label">Most hit</div><div class="hits">${hits}</div>` : '') +
+    (pts.length ? '' : `<div class="note">No tapped darts yet: darts show up here once they are tapped on the board.</div>`);
 }
 
 // ---------- Wiring ----------
@@ -888,6 +1320,29 @@ $('startSeg').onclick = e => {
   if (b) { setup.start = +b.dataset.v; save(); renderSetup(); }
 };
 $('doubleOut').onchange = e => { setup.doubleOut = e.target.checked; save(); };
+$('legsSeg').onclick = e => {
+  const b = e.target.closest('button');
+  if (b) { setup.firstTo = +b.dataset.v; save(); renderSetup(); }
+};
+$('histBtn').onclick = () => openStats('history');
+$('winHistBtn').onclick = () => openStats('history');
+$('rematchBtn').onclick = () => { rematch(); save(); render(); };
+$('winOverlay').onclick = e => { if (e.target === e.currentTarget) { winDismissed = true; render(); } };
+$('statsClose').onclick = closeStats;
+$('statsX').onclick = closeStats;
+$('statsOverlay').onclick = e => { if (e.target === e.currentTarget) closeStats(); };
+$('statsTabs').onclick = e => {
+  const b = e.target.closest('button');
+  if (b) { view.tab = b.dataset.t; renderStats(); }
+};
+$('legTabs').onclick = e => {
+  const b = e.target.closest('button');
+  if (b) { view.leg = b.dataset.leg; renderStats(); }
+};
+$('playerTabs').onclick = e => {
+  const b = e.target.closest('button');
+  if (b) { view.player = b.dataset.player; renderStats(); }
+};
 $('startBtn').onclick = () => { newGame(); save(); render(); };
 $('players').onclick = e => {
   const card = e.target.closest('[data-i]');
@@ -895,8 +1350,14 @@ $('players').onclick = e => {
 };
 $('editForm').onsubmit = e => { e.preventDefault(); saveEdit(Number($('editScore').value)); };
 $('editOverlay').onclick = e => { if (e.target === e.currentTarget) closeEdit(); };
-$('missBtn').onclick = () => throwDart(0, 0);
-$('nextBtn').onclick = confirmTurn;
+$('missBtn').onclick = () => {
+  if (navigator.vibrate) navigator.vibrate(15);   // same tap feedback as the board
+  throwDart(0, 0);
+};
+$('nextBtn').onclick = () => {
+  if (S && S.winner !== null) { winDismissed = false; render(); }
+  else confirmTurn();
+};
 // The strip under the board (outside the SVG) is still part of the board area: a miss.
 $('boardWrap').addEventListener('click', e => {
   if (e.target !== e.currentTarget) return;
@@ -914,19 +1375,31 @@ if (window.visualViewport) {
 $('padOverlay').onclick = e => { if (e.target === e.currentTarget) { $('padInput').blur(); closePad(); } };
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
+  if (!$('confirmOverlay').hidden) return closeConfirm();
   if (!$('padOverlay').hidden) { $('padInput').blur(); closePad(); }
   if (!$('editOverlay').hidden) closeEdit();
+  if (!$('statsOverlay').hidden) closeStats();
+  else if (!$('winOverlay').hidden) { winDismissed = true; render(); }
 });
 $('undoBtn').onclick = undo;
 $('winUndoBtn').onclick = undo;
 $('nextLegBtn').onclick = () => { nextLeg(); save(); render(); };
-$('newGameBtn').onclick = () => { S = null; undoStack = []; save(); render(); };
-$('quitBtn').onclick = () => {
-  if (confirm('Leave this game?')) { S = null; undoStack = []; save(); render(); }
-};
+const endGame = () => { S = null; undoStack = []; save(); render(); };
+$('newGameBtn').onclick = () => askConfirm(
+  'Start a new game?', 'This match\'s history and heatmap will be cleared.', 'New game', endGame);
+$('confirmNo').onclick = closeConfirm;
+$('confirmYes').onclick = () => { const a = confirmAction; closeConfirm(); if (a) a(); };
+$('confirmOverlay').onclick = e => { if (e.target === e.currentTarget) closeConfirm(); };
+$('quitBtn').onclick = () => askConfirm(
+  'Leave this game?', 'The current match, its history and heatmap will be lost.', 'Leave', endGame);
 
 load();
 render();
+
+// Works offline once visited (only over http(s); not when opened as a local file).
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
 </script>
 </body>
 </html>
